@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib';
 import { DeployWebAppStack } from '../lib/deploy-web-app-stack';
+import { HelloLambdaStack } from '../lib/hello-lambda-stack';
 
 
 const app = new cdk.App();
+
 new DeployWebAppStack(app, 'DeployWebAppStack', {
   /* If you don't specify 'env', this stack will be environment-agnostic.
    * Account/Region-dependent features and context lookups will not work,
@@ -19,3 +21,5 @@ new DeployWebAppStack(app, 'DeployWebAppStack', {
 
   /* For more information, see https://docs.aws.amazon.com/cdk/latest/guide/environments.html */
 });
+
+new HelloLambdaStack(app, 'HelloLambdaStack', {});
