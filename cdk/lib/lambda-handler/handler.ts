@@ -1,6 +1,13 @@
-export async function main() {
+interface LambdaEvent {
+  message: string;
+}
+
+interface LambdaResponse {
+  message: string;
+}
+
+export async function main(event: LambdaEvent): Promise<LambdaResponse> {
   return {
-    body: JSON.stringify({message: 'Hello from Lambda 🎉'}),
-    statusCode: 200,
+    message: `SUCCESS with message ${event.message} 🎉`,
   };
 }

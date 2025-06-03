@@ -21,11 +21,32 @@ export class HelloLambdaStack extends cdk.Stack {
       description: "This API serves the Lambda functions."
     });
 
-    const helloFromLambdaIntegration = new apigateway.LambdaIntegration(lambdaFunction, {});
+    const helloFromLambdaIntegration = new apigateway.LambdaIntegration(lambdaFunction, {
+      integrationResponses: [
+        {
+          statusCode: "200",
+        }
+      ],
+      requestTemplates: {
+        "application/json": `{ "message": "$input.params('message')" }` // Map the query param message
+      },
+      proxy: false,
+    });
 
     // Create a resource /hello and GET request under it
     const helloResource = api.root.addResource("hello");
     // On this resource attach a GET method which pass reuest to our Lambda function
-    helloResource.addMethod('GET', helloFromLambdaIntegration);
+    helloResource.addMethod('GET', helloFromLambdaIntegration, {
+      methodResponses: [
+        {
+          statusCode: "200",
+        }
+      ]
+    });
+
+    helloResource.addCorsPreflight({
+      allowOrigins: ['*'], // Replace with your frontend URL
+      allowMethods: ['GET'], // Allow GET method
+    })
   }
 }
