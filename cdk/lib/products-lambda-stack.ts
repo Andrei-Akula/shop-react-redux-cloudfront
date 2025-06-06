@@ -1,5 +1,6 @@
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
+import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as cdk from 'aws-cdk-lib';
 import * as path from 'path';
 import { Construct } from 'constructs';
@@ -77,7 +78,7 @@ function addGetProductById(scope: Construct, resource: apigateway.Resource) {
           },
           {
             statusCode: "400",
-            selectionPattern: "Product ID is required", // Assuming the Lambda function throws an error with this message
+            selectionPattern: ".+is required", // Assuming the Lambda function throws an error with this message
             responseParameters: {
               "method.response.header.Access-Control-Allow-Origin": "'*'",
               "method.response.header.Access-Control-Allow-Methods": "'GET'",
