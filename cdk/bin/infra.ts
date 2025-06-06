@@ -3,6 +3,7 @@ import * as cdk from 'aws-cdk-lib';
 import { DeployWebAppStack } from '../lib/deploy-web-app-stack';
 import { ProductsLambdaStack } from '../lib/products-lambda-stack';
 import { TablesStack } from '../lib/tables-stack';
+import { TablesSeedsStack } from '../lib/table-seeds-stack';
 
 const app = new cdk.App();
 
@@ -23,5 +24,7 @@ new DeployWebAppStack(app, 'DeployWebAppStack', {
 });
 
 new ProductsLambdaStack(app, 'ProductsLambdaStack', {});
+
+new TablesSeedsStack(app, 'TablesSeedsStack', {});
 
 new TablesStack(app, 'TablesStack', {});
