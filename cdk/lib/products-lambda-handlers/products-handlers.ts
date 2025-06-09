@@ -1,64 +1,56 @@
-import { Handler } from 'aws-lambda';
-import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
-import { v4 as uuidv4 } from 'uuid';
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { randomUUID } from "crypto";
+import { DynamoDBDocumentClient, GetCommand, NativeAttributeValue, PutCommand, ScanCommand, ScanCommandOutput  } from "@aws-sdk/lib-dynamodb";
+
+const client = new DynamoDBClient({});
+const docClient = DynamoDBDocumentClient.from(client);
 
 type Product = {
-    id: string | undefined;
+    id: string;
     title: string;
     description: string;
     price: number;
+};
+
+type Stock = {
+    product_id: string;
+    count: number;
 };
 
 type AvailableProduct = Product & {
     count: number;
 };
 
-export const products: Product[] = [
-  {
-    description: "Short Product Description1",
-    id: "7567ec4b-b10c-48c5-9345-fc73c48a80aa",
-    price: 24,
-    title: "ProductOne",
-  },
-  {
-    description: "Short Product Description7",
-    id: "7567ec4b-b10c-48c5-9345-fc73c48a80a1",
-    price: 15,
-    title: "ProductTitle",
-  },
-  {
-    description: "Short Product Description2",
-    id: "7567ec4b-b10c-48c5-9345-fc73c48a80a3",
-    price: 23,
-    title: "Product",
-  },
-  {
-    description: "Short Product Description4",
-    id: "7567ec4b-b10c-48c5-9345-fc73348a80a1",
-    price: 15,
-    title: "ProductTest",
-  },
-  {
-    description: "Short Product Descriptio1",
-    id: "7567ec4b-b10c-48c5-9445-fc73c48a80a2",
-    price: 23,
-    title: "Product2",
-  },
-  {
-    description: "Short Product Description7",
-    id: "7567ec4b-b10c-45c5-9345-fc73c48a80a1",
-    price: 15,
-    title: "ProductName",
-  },
-];
+const getStockCount = (productId: string, stock: Stock[]): number => {
+    const stockItem = stock.find(s => s.product_id === productId);
+    return stockItem ? stockItem.count : 0;
+  };
+  
+const mergeProductsWithStock = (products: Product[], stock: Stock[]): AvailableProduct[] => 
+  products.map((product) => ({
+    ...product,
+    count: getStockCount(product.id, stock),
+  }));
 
-
-export const availableProducts: AvailableProduct[] = products.map(
-  (product, index) => ({ ...product, count: index + 1 })
-);
 
 export async function getProductsList(): Promise<AvailableProduct[]> {
-  return availableProducts;
+  const getAllProducts = new ScanCommand({
+    TableName: "Products",
+  });
+
+  const getAllStock = new ScanCommand({
+    TableName: "Stock",
+  });
+
+  const [productsResponse, stockResponse] = await Promise.all([
+    docClient.send(getAllProducts), 
+    docClient.send(getAllStock)
+  ]);
+
+  const products: Product[] = productsResponse.Items as Product[] ?? [];
+  const stock: Stock[] = stockResponse.Items as Stock[] ?? [];
+
+  return mergeProductsWithStock(products, stock);
 }
 
 export async function getProductById(event: any): Promise<AvailableProduct | undefined> {
@@ -66,23 +58,73 @@ export async function getProductById(event: any): Promise<AvailableProduct | und
   if (!id) {
     throw new Error("Product ID is required");
   }
-  const product = availableProducts.find((p) => p.id === id);
-  if (!product) {
+
+  const getProduct = new GetCommand({
+    TableName: "Products",
+    Key: {
+      id: `${id}`,
+    },
+  });
+
+  const getStock = new GetCommand({
+    TableName: "Stock",
+    Key: {
+      product_id: `${id}`,
+    },
+  });
+
+  const [productResponse, stockResponse] = await Promise.all([
+    docClient.send(getProduct),
+    docClient.send(getStock)
+  ]);
+  
+  if (!productResponse.Item) {
     throw new Error(`Product with id ${id} not found`);
   }
-  return  product;
+
+  const product = productResponse.Item as Product;
+  const count = stockResponse.Item ? (stockResponse.Item as Stock).count : 0;
+
+  return  ({
+    ...product,
+    count
+  });
 }
 
 export async function createProduct(product: Product): Promise<AvailableProduct> {
   if (!product.title || !product.price) {
     throw new Error("Product title and price are required");
   }
+
+  const count = Math.floor(Math.random() * 20) + 1;
   const newProduct: AvailableProduct = {
     ...product,
-    id: crypto.randomUUID(),
-    count: 0, // Initial count is set to 0
+    id: randomUUID(),
+    count,
   };
-  availableProducts.push(newProduct);
+
+  const addProduct = new PutCommand({
+    TableName: "Products",
+    Item: {
+      id: newProduct.id,
+      title: newProduct.title,
+      description: newProduct.description,
+      price: newProduct.price.toString(),
+    },
+  });
+
+  const addStock = new PutCommand({
+    TableName: "Stock",
+    Item: {
+      product_id: newProduct.id,
+      count: count,
+    },
+  });
+
+  await Promise.all([
+    docClient.send(addProduct),
+    docClient.send(addStock)
+  ]);
   
   return newProduct; 
 }

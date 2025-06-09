@@ -27,7 +27,6 @@ export class TablesStack extends cdk.Stack {
     const productsTable = new dynamodb.Table(this, "ProductsTable", {
       tableName: "Products",
       partitionKey: { name: "id", type: dynamodb.AttributeType.STRING },
-      sortKey: { name: "title", type: dynamodb.AttributeType.STRING }, // Optional, if you want to sort by title
       removalPolicy: cdk.RemovalPolicy.DESTROY, // Only for dev/test environments
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       importSource: {
@@ -46,6 +45,12 @@ export class TablesStack extends cdk.Stack {
       exportName: "ProductsTableName",
     });
 
+    new CfnOutput(this, "ProductsTableArn", {
+      value: productsTable.tableArn,
+      description: "The Arn of the Products DynamoDB table",
+      exportName: "ProductsTableArn",
+    });
+
     // Create a DynamoDB table for stock products
     // First, import the bucket from another stack
     const stockSeedBucket = aws_s3.Bucket.fromBucketName(
@@ -57,7 +62,6 @@ export class TablesStack extends cdk.Stack {
     const stockTable = new dynamodb.Table(this, "StockTable", {
       tableName: "Stock",
       partitionKey: { name: "product_id", type: dynamodb.AttributeType.STRING },
-      sortKey: { name: "count", type: dynamodb.AttributeType.NUMBER }, // Optional, if you want to sort by count
       removalPolicy: RemovalPolicy.DESTROY, // Only for dev/test environments
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       importSource: {
@@ -74,6 +78,12 @@ export class TablesStack extends cdk.Stack {
       value: stockTable.tableName,
       description: "The name of the Stock Products DynamoDB table",
       exportName: "StockTableName",
+    });
+
+    new CfnOutput(this, "StockTableArn", {
+      value: stockTable.tableArn,
+      description: "The Arn of the Stock Products DynamoDB table",
+      exportName: "StockTableArn",
     });
   }
 }

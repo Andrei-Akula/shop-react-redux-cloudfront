@@ -1,9 +1,17 @@
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
-import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as cdk from 'aws-cdk-lib';
 import * as path from 'path';
 import { Construct } from 'constructs';
+import * as iam from 'aws-cdk-lib/aws-iam';
+
+const productsAndStockPoliicy = new iam.PolicyStatement({
+  actions: ["dynamodb:Scan", "dynamodb:GetItem"],
+  resources: [
+    cdk.Fn.importValue("ProductsTableArn"),
+    cdk.Fn.importValue("StockTableArn"),
+  ]
+});
 
 const commonLambdaFunctionProps = {
   runtime: lambda.Runtime.NODEJS_20_X,
@@ -18,6 +26,8 @@ function addGetProductsList(scope: Construct, productsResource: apigateway.Resou
       handler: 'products-handlers.getProductsList',
     });
 
+    getProductsListFunction.addToRolePolicy(productsAndStockPoliicy);
+
     const getProductsListIntegration = new apigateway.LambdaIntegration(getProductsListFunction, {
       integrationResponses: [
         {
@@ -26,7 +36,15 @@ function addGetProductsList(scope: Construct, productsResource: apigateway.Resou
             'method.response.header.Access-Control-Allow-Origin': "'*'",
             'method.response.header.Access-Control-Allow-Methods': "'GET'",
           },
-        }
+        },
+        {
+          statusCode: "403",
+          selectionPattern: ".+is not authorized", // Assuming the Lambda function throws an error with this message
+          responseParameters: {
+            "method.response.header.Access-Control-Allow-Origin": "'*'",
+            "method.response.header.Access-Control-Allow-Methods": "'GET'",
+          },
+        },
       ],
       requestTemplates: {
         "application/json": `{}` // No request body needed for this endpoint
@@ -47,7 +65,17 @@ function addGetProductsList(scope: Construct, productsResource: apigateway.Resou
             'method.response.header.Access-Control-Allow-Origin': true,
             'method.response.header.Access-Control-Allow-Methods': true,
           },
-        }
+        },
+        {
+          statusCode: "403",
+          responseModels: {
+            "application/json": apigateway.Model.ERROR_MODEL
+          },
+          responseParameters: {
+            'method.response.header.Access-Control-Allow-Origin': true,
+            'method.response.header.Access-Control-Allow-Methods': true,
+          },
+        },
       ]
     });
 
@@ -60,13 +88,15 @@ function addGetProductsList(scope: Construct, productsResource: apigateway.Resou
 }
 
 function addGetProductById(scope: Construct, resource: apigateway.Resource) {
-  const getProductById = new lambda.Function(scope, 'get-product-by-id', {
+  const getProductByIdFunction = new lambda.Function(scope, 'get-product-by-id', {
       ...commonLambdaFunctionProps,
       handler: 'products-handlers.getProductById',
     });
 
+    getProductByIdFunction.addToRolePolicy(productsAndStockPoliicy);
+
     const getProductByIdIntegration = new apigateway.LambdaIntegration(
-      getProductById,
+      getProductByIdFunction,
       {
         integrationResponses: [
           {
@@ -79,6 +109,14 @@ function addGetProductById(scope: Construct, resource: apigateway.Resource) {
           {
             statusCode: "400",
             selectionPattern: ".+is required", // Assuming the Lambda function throws an error with this message
+            responseParameters: {
+              "method.response.header.Access-Control-Allow-Origin": "'*'",
+              "method.response.header.Access-Control-Allow-Methods": "'GET'",
+            },
+          },
+          {
+            statusCode: "403",
+            selectionPattern: ".+is not authorized", // Assuming the Lambda function throws an error with this message
             responseParameters: {
               "method.response.header.Access-Control-Allow-Origin": "'*'",
               "method.response.header.Access-Control-Allow-Methods": "'GET'",
@@ -116,6 +154,16 @@ function addGetProductById(scope: Construct, resource: apigateway.Resource) {
         },
         {
           statusCode: "400",
+          responseModels: {
+            "application/json": apigateway.Model.ERROR_MODEL
+          },
+          responseParameters: {
+            'method.response.header.Access-Control-Allow-Origin': true,
+            'method.response.header.Access-Control-Allow-Methods': true,
+          },
+        },
+        {
+          statusCode: "403",
           responseModels: {
             "application/json": apigateway.Model.ERROR_MODEL
           },
