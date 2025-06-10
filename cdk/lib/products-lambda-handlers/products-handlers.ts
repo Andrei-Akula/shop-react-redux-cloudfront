@@ -91,16 +91,16 @@ export async function getProductById(event: any): Promise<AvailableProduct | und
   });
 }
 
-export async function createProduct(product: Product): Promise<AvailableProduct> {
+export async function createProduct(product: AvailableProduct): Promise<AvailableProduct> {
   if (!product.title || !product.price) {
     throw new Error("Product title and price are required");
   }
 
-  const count = Math.floor(Math.random() * 20) + 1;
+  const count = product.count || 0; // Default count to 0 if not provided
   const newProduct: AvailableProduct = {
     ...product,
     id: randomUUID(),
-    count,
+    count
   };
 
   const addProduct = new PutCommand({
@@ -127,4 +127,39 @@ export async function createProduct(product: Product): Promise<AvailableProduct>
   ]);
   
   return newProduct; 
+}
+
+export async function updateProductById({ id, product }: {id: string, product: AvailableProduct }): Promise<AvailableProduct> {
+  if (!id) {
+    throw new Error("Product ID is required");
+  }
+
+  if (!product.title || !product.price) {
+    throw new Error("Product title and price are required");
+  }
+
+  const addProduct = new PutCommand({
+    TableName: "Products",
+    Item: {
+      id,
+      title: product.title,
+      description: product.description,
+      price: product.price.toString(),
+    },
+  });
+
+  const addStock = new PutCommand({
+    TableName: "Stock",
+    Item: {
+      product_id: product.id,
+      count: product.count || 0, // Default count to 0 if not provided
+    },
+  });
+
+  await Promise.all([
+    docClient.send(addProduct),
+    docClient.send(addStock)
+  ]);
+  
+  return product; 
 }
