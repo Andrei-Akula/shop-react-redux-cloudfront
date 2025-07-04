@@ -5,7 +5,16 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as aws_s3 from 'aws-cdk-lib/aws-s3';
 import * as aws_s3_deployment from 'aws-cdk-lib/aws-s3-deployment';
-import { CfnOutput, RemovalPolicy } from 'aws-cdk-lib';
+import * as aws_s3_notifications from 'aws-cdk-lib/aws-s3-notifications';
+import * as iam from 'aws-cdk-lib/aws-iam';
+
+const productsAndStockWritePoliicy = new iam.PolicyStatement({
+  actions: ["dynamodb:PutItem"],
+  resources: [
+    cdk.Fn.importValue("ProductsTableArn"),
+    cdk.Fn.importValue("StockTableArn"),
+  ]
+});
 
 const commonIntegrationGetResponseParameters = {
   "method.response.header.Access-Control-Allow-Origin": "'*'",
@@ -17,6 +26,12 @@ const commonResponseRaparameters = {
   'method.response.header.Access-Control-Allow-Methods': true,
 };
 
+const commmonLambdaProps = {
+  runtime: lambda.Runtime.NODEJS_20_X,
+  memorySize: 1024,
+  timeout: cdk.Duration.seconds(5),
+  code: lambda.Code.fromAsset(path.join(__dirname, './import-products-file-handler')),
+}
 
 export class ImportServiceStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -26,12 +41,19 @@ export class ImportServiceStack extends cdk.Stack {
     const uploadedBucket = new aws_s3.Bucket(this, 'UploadedBucket', {
       autoDeleteObjects: true,
       blockPublicAccess: new aws_s3.BlockPublicAccess({ restrictPublicBuckets: true }),
-      removalPolicy: RemovalPolicy.DESTROY,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
       cors: [{
         allowedMethods: [aws_s3.HttpMethods.GET, aws_s3.HttpMethods.PUT],
         allowedOrigins: ['*'],
         allowedHeaders: ['*'],
       }],
+      lifecycleRules: [{
+        id: 'DeleteUploadedFiles',
+        enabled: true,
+        prefix: 'uploaded/',
+        expiration: cdk.Duration.days(1), // Automatically delete files after 1 day
+      }],
+      versioned: false,
     });
 
     uploadedBucket.addToResourcePolicy(new cdk.aws_iam.PolicyStatement({
@@ -40,23 +62,43 @@ export class ImportServiceStack extends cdk.Stack {
       principals: [new cdk.aws_iam.AnyPrincipal()],
     }));
 
-    new CfnOutput(this, 'UploadedBucketName', {
+    new cdk.CfnOutput(this, 'UploadedBucketName', {
       value: uploadedBucket.bucketName,
       description: 'The name of UploadedBucket',
       exportName: 'UploadedBucketName',
     });
 
-    // lambda
+    // lambdas
+    const commonLambdaEnvironment = {
+      UPLOADED_BUCKET_NAME: uploadedBucket.bucketName,
+    };
+
     const importProductsFileFunction = new lambda.Function(this, 'import-products-file-function', {
-      runtime: lambda.Runtime.NODEJS_20_X,
-      memorySize: 1024,
-      timeout: cdk.Duration.seconds(5),
+      ...commmonLambdaProps,
       handler: 'import-products-file-handler.importProductsFile',
-      code: lambda.Code.fromAsset(path.join(__dirname, './import-products-file-handler')),
-      environment: {
-        UPLOADED_BUCKET_NAME: uploadedBucket.bucketName,
-      },
+      environment: commonLambdaEnvironment,
     });
+
+    const importFileParserFunction = new lambda.Function(this, 'import-file-parser-function', {
+      ...commmonLambdaProps,
+      handler: 'import-products-file-handler.importFileParser',
+      environment: commonLambdaEnvironment,
+    });
+
+    // Grant Lambda permissions to write to DynamoDB
+    importFileParserFunction.addToRolePolicy(productsAndStockWritePoliicy);
+
+    // Grant Lambda permissions to read from S3
+    uploadedBucket.grantRead(importFileParserFunction);
+
+     // Add S3 notification for the uploaded/ prefix
+    uploadedBucket.addEventNotification(
+      aws_s3.EventType.OBJECT_CREATED, 
+      new aws_s3_notifications.LambdaDestination(importFileParserFunction),
+      {
+        prefix: 'uploaded/', // Only trigger for objects in the 'uploaded/' prefix);
+      }
+    );
 
     // API Gateway
     const api = new apigateway.RestApi(this, 'import-api', {
