@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib';
-import { DeployWebAppStack } from '../lib/deploy-web-app-stack';
-import { ProductsLambdaStack } from '../lib/products-lambda-stack';
-import { TablesStack } from '../lib/tables-stack';
-import { TablesSeedsStack } from '../lib/table-seeds-stack';
-import { ImportServiceStack } from '../lib/import-service-stack';
+import { DeployWebAppStack } from '../lib/stacks/DeployWebAppStack/deploy-web-app-stack';
+import { ProductsLambdaStack } from '../lib/stacks/ProductsLambdaStack/products-lambda-stack';
+import { TablesStack } from '../lib/stacks/TablesStack/tables-stack';
+import { TablesSeedsStack } from '../lib/stacks/TablesSeedsStack/tables-seeds-stack';
+import { ImportServiceStack } from '../lib/stacks/ImportServiceStack/import-service-stack';
 
 const app = new cdk.App();
 

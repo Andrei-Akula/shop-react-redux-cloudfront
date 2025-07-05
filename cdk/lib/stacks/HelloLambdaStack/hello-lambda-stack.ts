@@ -13,7 +13,7 @@ export class HelloLambdaStack extends cdk.Stack {
       memorySize: 1024,
       timeout: cdk.Duration.seconds(5),
       handler: 'handler.main',
-      code: lambda.Code.fromAsset(path.join(__dirname, './lambda-handler')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../lambdas/lambda-handler')),
     });
 
     const api = new apigateway.RestApi(this, "my-api", {

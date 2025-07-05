@@ -26,7 +26,7 @@ const commonLambdaFunctionProps = {
   runtime: lambda.Runtime.NODEJS_20_X,
   memorySize: 1024,
   timeout: cdk.Duration.seconds(5),
-  code: lambda.Code.fromAsset(path.join(__dirname, './products-lambda-handlers')),
+  code: lambda.Code.fromAsset(path.join(__dirname, '../../lambdas/products-lambda-handlers')),
 };
 
 const commonIntegrationGetResponseParameters = {
@@ -304,7 +304,7 @@ export class ProductsLambdaStack extends cdk.Stack {
       memorySize: 1024,
       timeout: cdk.Duration.seconds(5),
       handler: 'authorizer-handler.tokenAuthorizerHandler',
-      code: lambda.Code.fromAsset(path.join(__dirname, './authorizer-handler')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../lambdas/authorizer-handler')),
     });
 
     const authorizer = new TokenAuthorizer(this, 'TokenAuthorizer', {

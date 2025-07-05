@@ -30,7 +30,7 @@ const commmonLambdaProps = {
   runtime: lambda.Runtime.NODEJS_20_X,
   memorySize: 1024,
   timeout: cdk.Duration.seconds(5),
-  code: lambda.Code.fromAsset(path.join(__dirname, './import-products-file-handler')),
+  code: lambda.Code.fromAsset(path.join(__dirname, '../../lambdas/import-products-file-handler')),
 }
 
 export class ImportServiceStack extends cdk.Stack {
