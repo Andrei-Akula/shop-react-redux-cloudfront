@@ -7,6 +7,8 @@ import * as aws_s3 from 'aws-cdk-lib/aws-s3';
 import * as aws_s3_deployment from 'aws-cdk-lib/aws-s3-deployment';
 import * as aws_s3_notifications from 'aws-cdk-lib/aws-s3-notifications';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as sqs from "aws-cdk-lib/aws-sqs";
+import { SqsEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
 
 const productsAndStockWritePolicy = new iam.PolicyStatement({
   actions: ["dynamodb:PutItem"],
@@ -168,6 +170,57 @@ function createImportProductsFileFunction(scope: Construct, lambdaEnv: { [key: s
   });
 }
 
+function createProductQueue(scope: Construct) {
+  const timeout = 60 * 5; // 5 minutes
+  const queue = new sqs.Queue(scope, 'product-sqs', {
+    visibilityTimeout: cdk.Duration.seconds(timeout)
+  });
+
+  new cdk.CfnOutput(scope, 'ProductQueueName', {
+    value: queue.queueName,
+    description: 'The name of the Product SQS Queue',
+    exportName: 'ProductQueueName',
+  });
+
+  return queue;
+}
+
+function createImportFileParserWithQueueFunction(scope: Construct, lambdaEnv: { [key: string]: string }) {
+  return new lambda.Function(scope, 'import-file-parser-with-queue-function', {
+    ...commonLambdaProps,
+    handler: 'import-products-file-handler.importFileParserWithQueue',
+    environment: lambdaEnv,
+  });
+}
+
+function setupImportFileParseWithQueueFunction(lambda: lambda.Function, queue: sqs.Queue) {
+  queue.grantSendMessages(lambda);
+}
+
+function createCatalogBatchProcessFunction(scope: Construct, lambdaEnv: { [key: string]: string }) {
+  return new lambda.Function(scope, 'catalog-batch-process-function', {
+    ...commonLambdaProps,
+    handler: 'import-products-file-handler.catalogBatchProcess',
+    environment: lambdaEnv,
+  });
+}
+
+function addQueueEventSource(lambda: lambda.Function, queue: sqs.Queue) {
+  // Add SQS event source to the Lambda function
+  lambda.addEventSource(new SqsEventSource(queue, {
+    batchSize: 5, // Process up to 5 messages at a time
+    maxBatchingWindow: cdk.Duration.seconds(10), // Wait up to 10 seconds
+  }));
+}
+
+function setupCatalogBatchProcessFunction(lambda: lambda.Function, queue: sqs.Queue) {
+  // Grant Lambda permissions to consume messages from the queue
+  queue.grantConsumeMessages(lambda);
+
+  // Grant Lambda permissions to write to DynamoDB
+  lambda.addToRolePolicy(productsAndStockWritePolicy);
+}
+
 export class ImportServiceStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -178,13 +231,29 @@ export class ImportServiceStack extends cdk.Stack {
       UPLOADED_BUCKET_NAME: uploadedBucket.bucketName,
     };
 
-    const importFileParserFunction = createImportFileParserFunction(this, commonLambdaEnvironment);
-    setupImportFileParseFunction(importFileParserFunction);
-    addS3EventHandling(uploadedBucket, importFileParserFunction);
 
-    const importProductsFileFunction = createImportProductsFileFunction(this, commonLambdaEnvironment);
+    // const importFileParserFunction = createImportFileParserFunction(this, commonLambdaEnvironment);
+    // setupImportFileParseFunction(importFileParserFunction);
+    // addS3EventHandling(uploadedBucket, importFileParserFunction);
+
+    
+    // SQS Queue for processing products
+    const productQueue = createProductQueue(this);
+
+    const queuesLambdaEnv = {
+      PRODUCTS_QUEUE_URL: productQueue.queueUrl,
+    };
+
+    const importFileParserWithQueueFunction = createImportFileParserWithQueueFunction(this, { ...commonLambdaEnvironment, ...queuesLambdaEnv });
+    setupImportFileParseWithQueueFunction(importFileParserWithQueueFunction, productQueue);
+    addS3EventHandling(uploadedBucket, importFileParserWithQueueFunction);
+
+    const catalogBatchProcessFunction = createCatalogBatchProcessFunction(this, { ...commonLambdaEnvironment, ...queuesLambdaEnv });
+    setupCatalogBatchProcessFunction(catalogBatchProcessFunction, productQueue);
+    addQueueEventSource(catalogBatchProcessFunction, productQueue);
 
     // API Gateway
+    const importProductsFileFunction = createImportProductsFileFunction(this, commonLambdaEnvironment);
     createImportApiEndpoint(this, importProductsFileFunction); 
   }
 }

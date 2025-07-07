@@ -1,15 +1,16 @@
-import { S3Event, S3EventRecord } from 'aws-lambda';
+import { S3Event, S3EventRecord, SQSEvent, SQSRecord } from 'aws-lambda';
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { randomUUID } from "crypto";
 import { DynamoDBDocumentClient,  PutCommand,   } from "@aws-sdk/lib-dynamodb";
+import { DeleteMessageCommand, SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
 
-const client = new DynamoDBClient({ region: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION });
+const client = new DynamoDBClient({ });
 const docClient = DynamoDBDocumentClient.from(client);
 
-async function  createPresignedUrl({ region, bucket, key }: { region: string; bucket: string; key: string }) {
-  const client = new S3Client({ region });
+async function  createPresignedUrl({ bucket, key }: { bucket: string; key: string }) {
+  const client = new S3Client({ });
   const command = new PutObjectCommand({ Bucket: bucket, Key: key });
   const expiresIn = 60 * 5; // 5 minutes
   return getSignedUrl(client, command, { expiresIn });
@@ -28,14 +29,9 @@ export async function importProductsFile({ fileName }: { fileName: string }): Pr
     throw new Error("UPLOADED_BUCKET_NAME environment variable is not set");
   }
 
-  const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
-  if (!region) {
-    throw new Error("Region is not set");
-  }
-
   const key = `uploaded/${fileName}`;
-  
-  const presignedUrl = await createPresignedUrl({ region, bucket, key });
+
+  const presignedUrl = await createPresignedUrl({ bucket, key });
 
   return {
     presignedUrl
@@ -106,7 +102,7 @@ export async function addProductToDatabase(product: AvailableProduct) {
   });
 
   console.log(`Adding product to DB: ${JSON.stringify(newProduct)}`);
-  
+
   try {
     await docClient.send(addProduct);
     await docClient.send(addStock);
@@ -131,23 +127,26 @@ export function processCsvLine(line: string, index: number) {
   return product;
 }
 
-export async function processRecord (s3Client: S3Client, record: S3EventRecord) {
+export async function processCsvLines(lines: string[]) {
+  return Promise.all(lines.map((line, index) => {
+    const product = processCsvLine(line, index);
+    return product ? addProductToDatabase(product) : Promise.resolve();
+  }));
+}
+
+export async function getLinesFromRecord(s3Client: S3Client, record: S3EventRecord) {
   const bucket = record.s3.bucket.name;
   const key = decodeURIComponent(record.s3.object.key.replace(/\+/g, ' '));
-  
+
   console.log(`Processing file: ${key} from bucket: ${bucket}`);
-  
+
   try {
     // Get the file from S3
     const getObjectCommand = new GetObjectCommand({ Bucket: bucket, Key: key });
     const response = await s3Client.send(getObjectCommand);
-    
-    console.log(`File retrieved successfully: ${key}`);
-    console.log(`File size: ${response.ContentLength} bytes`);
 
-    // parse the CSV data and process it
-    console.log('Transforming file contents to string...');
-    
+    console.log(`File retrieved successfully: ${key}`);
+
     const bodyContents = await response.Body?.transformToString();
     if (!bodyContents) {
       console.log(`No content found in file: ${key}`);
@@ -157,11 +156,7 @@ export async function processRecord (s3Client: S3Client, record: S3EventRecord) 
     const lines = bodyContents.split('\n');
     console.log(`File contains: ${lines.length} lines`);
 
-    // Parse the CSV data and process it
-    await Promise.all(lines.map((line, index) => {
-      const product = processCsvLine(line, index);
-      return product ? addProductToDatabase(product) : Promise.resolve();
-    }));
+    return lines;
   } catch (error) {
     console.error(`Error retrieving file ${key} from bucket ${bucket}:`, error);
     return;
@@ -169,9 +164,90 @@ export async function processRecord (s3Client: S3Client, record: S3EventRecord) 
 };
 
 export async function importFileParser(event: S3Event): Promise<void> {
-  const s3Client = new S3Client({ region: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION });
+  const s3Client = new S3Client({ });
 
   for (const record of event.Records) {
-      await processRecord(s3Client, record);
+    const lines = await getLinesFromRecord(s3Client, record);
+    if (lines) {
+      await processCsvLines(lines);
+    }
+  }
+}
+
+
+export async function sendLinesToQueue(qClient: SQSClient, lines: string[]) {
+  if (!qClient) {
+    console.log("SQS client is not initialized");
+    return;
+  }
+
+  const queueUrl = process.env.PRODUCTS_QUEUE_URL;
+
+  for (const line of lines) {
+    const params = {
+      QueueUrl: queueUrl,
+      MessageBody: line,
+    };
+
+    try {
+      await qClient.send(new SendMessageCommand(params));
+      console.log(`Line sent to queue: ${line}`);
+    } catch (error) {
+      console.error(`Error sending line to queue: ${line}`, error);
+    }
+  }
+}
+
+export async function importFileParserWithQueue(event: S3Event): Promise<void> {
+  const s3Client = new S3Client({ });
+  const qClient = new SQSClient({ });
+
+  for (const record of event.Records) {
+    const lines = await getLinesFromRecord(s3Client, record);
+    if (lines) {
+      await sendLinesToQueue(qClient, lines);
+    }
+  }
+}
+
+export async function DeleteQueueMessage(qClient: SQSClient, message: SQSRecord) {
+  console.log("Deleting message:", message.messageId);
+
+  const queueUrl = process.env.PRODUCTS_QUEUE_URL;
+  try {
+    await qClient.send(
+      new DeleteMessageCommand({
+        QueueUrl: queueUrl,
+        ReceiptHandle: message.receiptHandle,
+      })
+    );
+    console.log("Message deleted:", message.messageId);
+  } catch (error) {
+    console.error('Error deleting message:', message.messageId);
+  }
+}
+
+
+export async function processQueueMessage(qClient: SQSClient, message: SQSRecord) {
+  console.log("Processing message:", message.messageId, message.body);
+
+  // Parse message body
+  const line = message.body;
+  const product = parseProductCsvLine(line);
+  if (!product) {
+    console.log(`Message: ${message.messageId}. No valid product data found: ${line}`);
+    return;
+  }
+
+  await DeleteQueueMessage(qClient, message);
+  return await addProductToDatabase(product);
+}
+
+export async function catalogBatchProcess(event: SQSEvent): Promise<void> {
+  const qClient = new SQSClient({ });
+
+  for (const message of event.Records) {
+    console.log("Received message:", message.body);
+    await processQueueMessage(qClient, message);
   }
 }
