@@ -72,7 +72,11 @@ export function parseProductCsvLine(line: string): AvailableProduct | undefined 
   return { id, title, description, price, count };
 }
 
-export async function addProductToDatabase(product: AvailableProduct) {
+export interface ActionOptions {
+  throw?: boolean
+}
+
+export async function addProductToDatabase(product: AvailableProduct, options?: ActionOptions) {
   if (!product.title || !product.price) {
     console.log("Product title and price are required", product.id);
     return product;
@@ -109,6 +113,9 @@ export async function addProductToDatabase(product: AvailableProduct) {
     console.log(`New product added to DB: ${JSON.stringify(newProduct)}`);
   } catch (error) {
     console.error("Error adding product to database:", error);
+    if (options?.throw) {
+      throw error;
+    }
   }
 
   return newProduct;
@@ -239,9 +246,20 @@ export async function processQueueMessage(qClient: SQSClient, message: SQSRecord
     return;
   }
 
-  await DeleteQueueMessage(qClient, message);
-  return await addProductToDatabase(product);
+  return await addProductToDatabase(product, { throw: true });
 }
+
+/**
+ * When you configure an SQS event source for Lambda, AWS manages the message polling and delivery automatically
+ * What AWS Does Behind the Scenes:
+  1. Polls the queue continuously using ReceiveMessage
+  2. Moves messages to "In Flight" state when received
+  3. Invokes your Lambda with the messages
+  4. Deletes messages automatically if Lambda succeeds
+  5. Returns messages to queue if Lambda fails (for retry)
+ */
+
+// TODO: implement Partial Batch Failure Handling
 
 export async function catalogBatchProcess(event: SQSEvent): Promise<void> {
   const qClient = new SQSClient({ });

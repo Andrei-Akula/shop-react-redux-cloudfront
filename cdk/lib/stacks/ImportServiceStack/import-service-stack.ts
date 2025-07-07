@@ -205,11 +205,15 @@ function createCatalogBatchProcessFunction(scope: Construct, lambdaEnv: { [key: 
   });
 }
 
+// TODO: Enable Partial Batch Failure
+// https://docs.aws.amazon.com/lambda/latest/dg/with-sqs.html#services-sqs-batchfailurereporting
+
 function addQueueEventSource(lambda: lambda.Function, queue: sqs.Queue) {
   // Add SQS event source to the Lambda function
   lambda.addEventSource(new SqsEventSource(queue, {
     batchSize: 5, // Process up to 5 messages at a time
     maxBatchingWindow: cdk.Duration.seconds(10), // Wait up to 10 seconds
+    // reportBatchItemFailures: true // Enable partial failure 
   }));
 }
 
