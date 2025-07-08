@@ -5,6 +5,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { randomUUID } from "crypto";
 import { DynamoDBDocumentClient,  PutCommand,   } from "@aws-sdk/lib-dynamodb";
 import { DeleteMessageCommand, SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
+import { PublishCommand, SNSClient } from "@aws-sdk/client-sns";
 
 const client = new DynamoDBClient({ });
 const docClient = DynamoDBDocumentClient.from(client);
@@ -234,6 +235,27 @@ export async function DeleteQueueMessage(qClient: SQSClient, message: SQSRecord)
   }
 }
 
+export async function notifyProductAdded(snsClient: SNSClient, product: AvailableProduct) {
+  const topicArn = process.env.PRODUCT_TOPIC_ARN;
+  const message = `Product successfully added:
+- ID: ${product.id}
+- Title: ${product.title}
+- Description: ${product.description}
+- Price: $${product.price}
+- Count: ${product.count}`;
+
+  try {
+    await snsClient.send(
+      new PublishCommand({
+        Message: message,
+        TopicArn: topicArn,
+      }),
+    );
+    console.log('Published to Product topic for product', product.id);
+  } catch (error) {
+    console.error('Error publishing to Product topic');
+  }
+}
 
 export async function processQueueMessage(qClient: SQSClient, message: SQSRecord) {
   console.log("Processing message:", message.messageId, message.body);
@@ -263,9 +285,11 @@ export async function processQueueMessage(qClient: SQSClient, message: SQSRecord
 
 export async function catalogBatchProcess(event: SQSEvent): Promise<void> {
   const qClient = new SQSClient({ });
+  const snsClient = new SNSClient({});
 
   for (const message of event.Records) {
     console.log("Received message:", message.body);
-    await processQueueMessage(qClient, message);
+    const product = await processQueueMessage(qClient, message);
+    if (product) await notifyProductAdded(snsClient, product);
   }
 }

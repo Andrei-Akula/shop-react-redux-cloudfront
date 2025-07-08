@@ -8,7 +8,9 @@ import * as aws_s3_deployment from 'aws-cdk-lib/aws-s3-deployment';
 import * as aws_s3_notifications from 'aws-cdk-lib/aws-s3-notifications';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as sqs from "aws-cdk-lib/aws-sqs";
+import * as sns from 'aws-cdk-lib/aws-sns';
 import { SqsEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
+import { EmailSubscription } from 'aws-cdk-lib/aws-sns-subscriptions';
 
 const productsAndStockWritePolicy = new iam.PolicyStatement({
   actions: ["dynamodb:PutItem"],
@@ -185,6 +187,16 @@ function createProductQueue(scope: Construct) {
   return queue;
 }
 
+function createSNSProductTopic(scope: Construct) {
+  const productTopic = new sns.Topic(scope, 'product-topic', {
+    displayName: 'Product subscription topic '
+  });
+
+  productTopic.addSubscription(new EmailSubscription('andrius.akula@gmail.com'));
+
+  return productTopic;
+}
+
 function createImportFileParserWithQueueFunction(scope: Construct, lambdaEnv: { [key: string]: string }) {
   return new lambda.Function(scope, 'import-file-parser-with-queue-function', {
     ...commonLambdaProps,
@@ -213,22 +225,29 @@ function addQueueEventSource(lambda: lambda.Function, queue: sqs.Queue) {
   lambda.addEventSource(new SqsEventSource(queue, {
     batchSize: 5, // Process up to 5 messages at a time
     maxBatchingWindow: cdk.Duration.seconds(10), // Wait up to 10 seconds
-    // reportBatchItemFailures: true // Enable partial failure 
+    // reportBatchItemFailures: true // Enable partial failure
   }));
 }
 
-function setupCatalogBatchProcessFunction(lambda: lambda.Function, queue: sqs.Queue) {
+function setupCatalogBatchProcessFunction(lambda: lambda.Function, queue: sqs.Queue, snsTopic: sns.Topic) {
   // Grant Lambda permissions to consume messages from the queue
   queue.grantConsumeMessages(lambda);
 
   // Grant Lambda permissions to write to DynamoDB
   lambda.addToRolePolicy(productsAndStockWritePolicy);
+
+  // Grant Lambda permissions to publish to SNS topic
+  lambda.addToRolePolicy(new iam.PolicyStatement({
+    actions: ['sns:Publish'],
+    resources: [snsTopic.topicArn]
+  }));
 }
+
 
 export class ImportServiceStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
-    
+
     const uploadedBucket = createUploadedBucket(this);
 
     const commonLambdaEnvironment = {
@@ -240,25 +259,31 @@ export class ImportServiceStack extends cdk.Stack {
     // setupImportFileParseFunction(importFileParserFunction);
     // addS3EventHandling(uploadedBucket, importFileParserFunction);
 
-    
+
     // SQS Queue for processing products
     const productQueue = createProductQueue(this);
 
+    // SNS product topic
+    const productTopic = createSNSProductTopic(this);
+
     const queuesLambdaEnv = {
       PRODUCTS_QUEUE_URL: productQueue.queueUrl,
+    };
+
+    const topicLambdaEnv = {
+      PRODUCT_TOPIC_ARN: productTopic.topicArn
     };
 
     const importFileParserWithQueueFunction = createImportFileParserWithQueueFunction(this, { ...commonLambdaEnvironment, ...queuesLambdaEnv });
     setupImportFileParseWithQueueFunction(importFileParserWithQueueFunction, productQueue);
     addS3EventHandling(uploadedBucket, importFileParserWithQueueFunction);
 
-    const catalogBatchProcessFunction = createCatalogBatchProcessFunction(this, { ...commonLambdaEnvironment, ...queuesLambdaEnv });
-    setupCatalogBatchProcessFunction(catalogBatchProcessFunction, productQueue);
+    const catalogBatchProcessFunction = createCatalogBatchProcessFunction(this, { ...commonLambdaEnvironment, ...queuesLambdaEnv, ...topicLambdaEnv });
+    setupCatalogBatchProcessFunction(catalogBatchProcessFunction, productQueue, productTopic);
     addQueueEventSource(catalogBatchProcessFunction, productQueue);
 
     // API Gateway
     const importProductsFileFunction = createImportProductsFileFunction(this, commonLambdaEnvironment);
-    createImportApiEndpoint(this, importProductsFileFunction); 
+    createImportApiEndpoint(this, importProductsFileFunction);
   }
 }
-
