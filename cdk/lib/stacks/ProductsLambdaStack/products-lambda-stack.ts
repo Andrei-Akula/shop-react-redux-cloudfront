@@ -22,6 +22,15 @@ const productsAndStockWritePoliicy = new iam.PolicyStatement({
   ]
 });
 
+const productsAndStockDeletePoliicy = new iam.PolicyStatement({
+  actions: ["dynamodb:DeleteItem"],
+  resources: [
+    cdk.Fn.importValue("ProductsTableArn"),
+    cdk.Fn.importValue("StockTableArn"),
+  ]
+});
+
+
 const commonLambdaFunctionProps = {
   runtime: lambda.Runtime.NODEJS_20_X,
   memorySize: 1024,
@@ -36,7 +45,7 @@ const commonIntegrationGetResponseParameters = {
 
 const commonIntegrationGetPostResponseParameters = {
   "method.response.header.Access-Control-Allow-Origin": "'*'",
-  "method.response.header.Access-Control-Allow-Methods": "'GET','POST','PUT'",
+  "method.response.header.Access-Control-Allow-Methods": "'GET','POST','PUT','DELETE'",
 };
 
 const commonResponseRaparameters = {
@@ -295,6 +304,40 @@ function addUpdateProductById(scope: Construct, resource: apigateway.Resource, a
   return resource;
 }
 
+function addDeleteProductById(scope: Construct, resource: apigateway.Resource, authorizer: apigateway.IAuthorizer) {
+  const deleteProductByIdFunction = new lambda.Function(
+    scope,
+    "delete-product-by-id",
+    {
+      ...commonLambdaFunctionProps,
+      handler: "products-handlers.deleteProductById",
+    }
+  );
+
+  deleteProductByIdFunction.addToRolePolicy(productsAndStockDeletePoliicy);
+
+  const deleteProductByIdIntegration = new apigateway.LambdaIntegration(
+    deleteProductByIdFunction,
+    {
+      integrationResponses: commonIntegrationResponses,
+      requestTemplates: {
+        "application/json": `{ "id": "$input.params('id')" }`, // Map the path parameter id and pass the entire request body as JSON
+      },
+      passthroughBehavior: apigateway.PassthroughBehavior.NEVER,
+      proxy: false,
+    }
+  );
+
+  // Create a resource /products/{id} and DELETE request under it
+  resource.addMethod("DELETE", deleteProductByIdIntegration, {
+    methodResponses: commonMethodResponses,
+    authorizer,
+    authorizationType: apigateway.AuthorizationType.CUSTOM,
+  });
+
+  return resource;
+}
+
 export class ProductsLambdaStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -339,13 +382,15 @@ export class ProductsLambdaStack extends cdk.Stack {
 
     productByIdResource.addCorsPreflight({
       allowOrigins: ['*'], // Replace with your frontend URL
-      allowMethods: ['GET,PUT'],
+      allowMethods: ['GET,PUT,DELETE'],
     });
 
     // GET - get product by id request
     addGetProductById(this, productByIdResource);
     // PUT - update the existing product request
     addUpdateProductById(this, productByIdResource, authorizer);
+    // DELETE - delete product by id
+    addDeleteProductById(this, productByIdResource, authorizer)
   }
 }
 

@@ -1,6 +1,10 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { randomUUID } from "crypto";
-import { DynamoDBDocumentClient, GetCommand, NativeAttributeValue, PutCommand, ScanCommand, ScanCommandOutput  } from "@aws-sdk/lib-dynamodb";
+import { DeleteCommand, DynamoDBDocumentClient, GetCommand, NativeAttributeValue, PutCommand, ScanCommand, ScanCommandOutput  } from "@aws-sdk/lib-dynamodb";
+
+
+const PRODUCTS_TABLE_NAME = 'Products';
+const STOCK_TABLE_NAME = 'Stock';
 
 const client = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client);
@@ -35,12 +39,14 @@ const mergeProductsWithStock = (products: Product[], stock: Stock[]): AvailableP
 
 export async function getProductsList(): Promise<AvailableProduct[]> {
   const getAllProducts = new ScanCommand({
-    TableName: "Products",
+    TableName: PRODUCTS_TABLE_NAME,
   });
 
   const getAllStock = new ScanCommand({
-    TableName: "Stock",
+    TableName: STOCK_TABLE_NAME,
   });
+
+  console.log(`Getting product list from DB`);
 
   const [productsResponse, stockResponse] = await Promise.all([
     docClient.send(getAllProducts), 
@@ -60,18 +66,20 @@ export async function getProductById(event: any): Promise<AvailableProduct | und
   }
 
   const getProduct = new GetCommand({
-    TableName: "Products",
+    TableName: PRODUCTS_TABLE_NAME,
     Key: {
       id: `${id}`,
     },
   });
 
   const getStock = new GetCommand({
-    TableName: "Stock",
+    TableName: STOCK_TABLE_NAME,
     Key: {
       product_id: `${id}`,
     },
   });
+
+  console.log(`Getting product ${id} from DB`);
 
   const [productResponse, stockResponse] = await Promise.all([
     docClient.send(getProduct),
@@ -104,7 +112,7 @@ export async function createProduct(product: AvailableProduct): Promise<Availabl
   };
 
   const addProduct = new PutCommand({
-    TableName: "Products",
+    TableName: PRODUCTS_TABLE_NAME,
     Item: {
       id: newProduct.id,
       title: newProduct.title,
@@ -114,12 +122,14 @@ export async function createProduct(product: AvailableProduct): Promise<Availabl
   });
 
   const addStock = new PutCommand({
-    TableName: "Stock",
+    TableName: STOCK_TABLE_NAME,
     Item: {
       product_id: newProduct.id,
       count: count,
     },
   });
+
+  console.log(`Adding new product ${newProduct.id} in DB`);
 
   await Promise.all([
     docClient.send(addProduct),
@@ -139,7 +149,7 @@ export async function updateProductById({ id, product }: {id: string, product: A
   }
 
   const addProduct = new PutCommand({
-    TableName: "Products",
+    TableName: PRODUCTS_TABLE_NAME,
     Item: {
       id,
       title: product.title,
@@ -149,12 +159,14 @@ export async function updateProductById({ id, product }: {id: string, product: A
   });
 
   const addStock = new PutCommand({
-    TableName: "Stock",
+    TableName: STOCK_TABLE_NAME,
     Item: {
       product_id: product.id,
       count: product.count || 0, // Default count to 0 if not provided
     },
   });
+
+  console.log(`Updating product ${id} in DB`);
 
   await Promise.all([
     docClient.send(addProduct),
@@ -162,4 +174,33 @@ export async function updateProductById({ id, product }: {id: string, product: A
   ]);
   
   return product; 
+}
+
+export async function deleteProductById({ id }: {id: string }) {
+  if (!id) {
+    throw new Error("Product ID is required");
+  }
+
+  const deleteProduct = new DeleteCommand({
+    TableName: PRODUCTS_TABLE_NAME,
+    Key: {
+      id,
+    },
+  });
+
+  const deleteStocks = new DeleteCommand({
+    TableName: STOCK_TABLE_NAME,
+    Key: {
+      product_id: id,
+    },
+  });
+
+  console.log(`Deleting product ${id} from DB`);
+  
+  await Promise.all([
+    docClient.send(deleteProduct),
+    docClient.send(deleteStocks),
+  ]);
+
+  return `Product with id ${id} has been successfully deleted`;
 }
