@@ -348,6 +348,9 @@ export class ProductsLambdaStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(5),
       handler: 'authorizer-handler.tokenAuthorizerHandler',
       code: lambda.Code.fromAsset(path.join(__dirname, '../../lambdas/authorizer-handler')),
+      environment: {
+        AUTHORIZATION_TOKEN: process.env.AUTHORIZATION_TOKEN || '',
+      }
     });
 
     const authorizer = new TokenAuthorizer(this, 'TokenAuthorizer', {
